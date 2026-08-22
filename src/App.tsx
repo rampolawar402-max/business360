@@ -1,4 +1,5 @@
-import { useState, createContext, useContext } from "react";
+import { supabase } from "./supabase";
+import { useState, useEffect, createContext, useContext } from "react";
 import LandingPage from "./LandingPage";
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
@@ -375,7 +376,7 @@ function InvoiceView({ bill, onBack }: { bill: Bill; onBack: () => void }) {
 
 // ─── New Bill Wizard ──────────────────────────────────────────────────────────
 
-function NewBill({ onSave, bills }: { onSave: (bill: Bill) => void; bills: Bill[] }) {
+function NewBill({ onSave, bills }: { onSave: (bill: Bill) => Promise<void>; bills: Bill[] }) {
   const [step, setStep] = useState(1);
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [items, setItems] = useState<LineItem[]>([{ id: uid(), name: "", qty: 1, price: 0 }]);
@@ -392,7 +393,7 @@ function NewBill({ onSave, bills }: { onSave: (bill: Bill) => void; bills: Bill[
   const updateItem = (id: string, field: keyof LineItem, value: string | number) =>
     setItems((p) => p.map((i) => (i.id === id ? { ...i, [field]: value } : i)));
 
-  const generate = () => {
+  const generate = async () => {
     const bill: Bill = {
       id: uid(),
       billNumber: billNumberNext(bills),
@@ -405,8 +406,8 @@ function NewBill({ onSave, bills }: { onSave: (bill: Bill) => void; bills: Bill[
       date: new Date(),
       status: "paid",
     };
-    onSave(bill);
-    setSuccess(true);
+   await onSave(bill);
+setSuccess(true);;
   };
 
   if (success) {
@@ -1170,11 +1171,67 @@ export default function App() {
   const [page, setPage] = useState<"landing" | "dashboard">("landing");
   const [theme, setTheme] = useState<Theme>("light");
   const [view, setView] = useState<View>("dashboard");
-  const [bills, setBills] = useState<Bill[]>(SEED_BILLS);
+  const [bills, setBills] = useState<Bill[]>([]);
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const handleSaveBill = (bill: Bill) => setBills((prev) => [bill, ...prev]);
+  useEffect(() => {
+  const loadBills = async () => {
+    const { data, error } = await supabase
+      .from("bills")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error loading bills:", error);
+      return;
+    }
+
+    if (data) {
+      const loadedBills: Bill[] = data.map((row) => ({
+  id: String(row.id),
+  billNumber: row.bill_number || `INV-${String(row.id).padStart(4, "0")}`,
+  customer: {
+    name: row.customer_name || "Customer",
+    phone: row.customer_phone || "",
+  },
+  items: row.items || [],
+  subtotal: Number(row.subtotal || row.total),
+  discount: Number(row.discount || 0),
+  tax: Number(row.tax || 0),
+  total: Number(row.total),
+  date: new Date(row.created_at),
+  status: row.status || "paid",
+}));
+
+      setBills(loadedBills);
+    }
+  };
+
+  loadBills();
+}, []);
+
+const handleSaveBill = async (bill: Bill) => {
+  const { error } = await supabase.from("bills").insert({
+    bill_number: bill.billNumber,
+    customer_name: bill.customer.name,
+    customer_phone: bill.customer.phone,
+    items: bill.items,
+    subtotal: bill.subtotal,
+    discount: bill.discount,
+    tax: bill.tax,
+    total: bill.total,
+    status: bill.status,
+  });
+
+  if (error) {
+    console.error("Error saving bill:", error);
+    alert("Bill could not be saved: " + error.message);
+    return;
+  }
+
+  setBills((prev) => [bill, ...prev]);
+};
 
   const handleViewBill = (bill: Bill) => {
     setSelectedBill(bill);
